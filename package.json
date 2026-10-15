@@ -1,0 +1,46 @@
+{
+  "name": "orcarouter-bulk-apikey",
+  "version": "1.0.0",
+  "description": "Bulk API keys for orcarouter.ai — free tier: 208 models listed (orcarouter/free, fusion-mini, deepseek-v4-flash); inference needs credits or a GitHub-linked owner. One account per key, any number.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "orcarouter-bulk-apikey": "cli.js",
+    "orcarouter-bulk-apikey-launcher": "launcher.js"
+  },
+  "main": "cli.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node launcher.js",
+    "mint": "node cli.js"
+  },
+  "keywords": [
+    "api-key",
+    "bulk",
+    "register",
+    "launcher",
+    "orcarouter",
+    "bulk",
+    "apikey"
+  ],
+  "files": [
+    "cdp.js",
+    "chrome-flags.js",
+    "cli.js",
+    "imap.js",
+    "inbox.js",
+    "launcher.js",
+    "lib.js",
+    "mailbox-imap.js",
+    "mint.js",
+    "newapi.js",
+    "proxy.js",
+    "solver.js",
+    "turnstile-lane.js",
+    "verify.js",
+    "README.md",
+    "LICENSE"
+  ]
+}
