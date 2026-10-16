@@ -5,16 +5,17 @@
   "license": "MIT",
   "type": "commonjs",
   "bin": {
-    "orcarouter-bulk-apikey": "cli.js",
-    "orcarouter-bulk-apikey-launcher": "launcher.js"
+    "orcarouter-bulk-apikey": "src/cli.js",
+    "orcarouter-bulk-apikey-9router": "src/connect-9router.js",
+    "orcarouter-bulk-apikey-launcher": "src/launcher.js"
   },
-  "main": "cli.js",
+  "main": "src/cli.js",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "start": "node launcher.js",
-    "mint": "node cli.js"
+    "start": "node src/launcher.js",
+    "mint": "node src/cli.js"
   },
   "keywords": [
     "api-key",
@@ -23,23 +24,27 @@
     "launcher",
     "orcarouter",
     "bulk",
-    "apikey"
+    "apikey",
+    "9router",
+    "openai-compatible"
   ],
   "files": [
-    "cdp.js",
-    "chrome-flags.js",
-    "cli.js",
-    "imap.js",
-    "inbox.js",
-    "launcher.js",
-    "lib.js",
-    "mailbox-imap.js",
-    "mint.js",
-    "newapi.js",
-    "proxy.js",
-    "solver.js",
-    "turnstile-lane.js",
-    "verify.js",
+    "src/cdp.js",
+    "src/chrome-flags.js",
+    "src/cli.js",
+    "src/connect-9router.js",
+    "src/imap.js",
+    "src/inbox.js",
+    "src/launcher.js",
+    "src/lib.js",
+    "src/mailbox-imap.js",
+    "src/mint.js",
+    "src/newapi.js",
+    "src/proxy.js",
+    "src/solver.js",
+    "src/turnstile-lane.js",
+    "src/verify.js",
+    "src/models.json",
     "README.md",
     "LICENSE"
   ]
