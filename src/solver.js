@@ -49,9 +49,10 @@ const { spawn } = require('child_process');
 
 const { CDP } = require('./cdp.js');
 const { parseProxy, createAgent, browserUrl, loadPoolFile, usableInBrowser, isLocalHost, fetchText } = require('./proxy.js');
-const { leanArgs } = require(path.join(__dirname, 'chrome-flags.js'));
+const { leanArgs, chromePath, fingerprintForSeed } = require(path.join(__dirname, 'chrome-flags.js'));
 
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+// SD_CHROME moves the browser binary; SD_CHROME_HEADLESS_SHELL only when headless.
+const CHROME = chromePath();
 const ROOT = path.join(__dirname);
 const OUTDIR = path.join(ROOT, 'out');
 
@@ -189,6 +190,10 @@ async function waitPort(port, timeoutMs = 25000) {
 
 function launchChrome(port, { headless, proxyServer }) {
   const profileDir = path.join(os.homedir(), `.captcha-solve-chrome-${Date.now().toString(36)}`);
+  // This profile's own UA from the chrome-flags pool (SD_UA / SD_UA_POOL pin one).
+  // The window size stays 520x820 on purpose: the click geometry of this solver
+  // is measured against it, so only identity (UA/TZ) rotates here.
+  const fp = fingerprintForSeed(profileDir);
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profileDir}`,
@@ -199,12 +204,13 @@ function launchChrome(port, { headless, proxyServer }) {
     // no CDP target of their own (measured on recaptcha-demo.appspot.com, where the
     // whole OOPIF-native path — and the inline fallback, since the frame is
     // cross-origin — both become unusable). One browser, so the RAM is affordable.
-    ...leanArgs({ headless }).filter((a) => !/^--renderer-process-limit/.test(a)),
+    ...leanArgs({ headless, ua: fp.userAgent }).filter((a) => !/^--renderer-process-limit/.test(a)),
   ];
   // One shared proxy at launch is only used for the "measurement without model
   // traffic" case; per-run browser contexts carry their own exit.
   if (proxyServer) args.push(`--proxy-server=${proxyServer}`);
-  const child = spawn(CHROME, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  // SD_CHROME_HEADLESS_SHELL applies only to the headless branch of this launch.
+  const child = spawn(chromePath({ headless }), args, { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, TZ: fp.timezone } });
   child.unref();
   return { pid: child.pid, profileDir, port };
 }

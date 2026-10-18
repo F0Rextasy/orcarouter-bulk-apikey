@@ -31,9 +31,26 @@ const one = (n, d) => {
 };
 const has = (n) => argv.includes(`--${n}`);
 
+// Run-shape presets (operator standard v3): `--preset=turbo|balanced|safe` picks the
+// lane count (turbo = 5, clamped by this repo's 1-3 lane cap) and the pacing gap;
+// explicit `--conc` / `--gap` always win and no `--preset` keeps today's defaults.
+const { presetArgv, resolvePreset } = require('./preset');
+const gapArg = one('gap', null);
+const PRESET = resolvePreset({
+  preset: presetArgv(argv) || one('preset', null),
+  conc: null,
+  gap: gapArg == null ? null : parseFloat(gapArg),
+  defaultConc: 1,
+});
+const GAP_MS = PRESET.gap == null ? null : Math.max(0, PRESET.gap) * 1000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Keep the loop alive when a lane's socket dies mid-run.
+process.on('uncaughtException', (e) => console.log(`WARN uncaught: ${String(e && e.message).slice(0, 180)}`));
+
 const COUNT = parseInt(one('count', '5'), 10);
 const ATTEMPTS = parseInt(one('attempts', String(Math.max(COUNT + 3, 6))), 10);
-const CONC = Math.max(1, Math.min(3, parseInt(one('conc', '1'), 10)));
+const CONC = Math.max(1, Math.min(3, parseInt(one('conc', String(PRESET.conc)), 10)));
 const RUNS = one('runs', '2');
 const TAG = one('tag', 'orc');
 // --pool overrides proxies.txt (lists live under out/).
@@ -53,6 +70,8 @@ if (has('help') || has('h')) {
   console.log('  --conc      parallel lanes, 1-3              (default 1)');
   console.log('  --runs      solver runs per Turnstile token  (default 2)');
   console.log('  --pool      exit list, default proxies.txt');
+  console.log('  --preset    turbo|balanced|safe              (default: none — 1 lane)');
+  console.log('  --gap       seconds between attempts         (default: none)');
   console.log('exits: one per line in proxies.txt — scheme://host:port[#comment], user:pass@ supported');
   process.exit(0);
 }
@@ -126,7 +145,9 @@ async function attemptOnce(lane) {
   const i = ++attemptsUsed;
   const t0 = Date.now();
   const logPath = path.join(LOOP_DIR, `attempt-${i}.log`);
-  log(`--- attempt ${i} (lane ${lane}, keys ${keyLines().length}/${startKeys + COUNT})`);
+  const beforeKeys = keyLines().length;
+  log(`--- attempt ${i} (lane ${lane}, keys ${beforeKeys}/${startKeys + COUNT})`);
+  console.log(`… #${i} başladı (lane ${lane}, ${POOL ? path.basename(POOL) : 'proxies.txt'})`);
   const code = await new Promise((resolve) => {
     const out = fs.createWriteStream(logPath);
     const laneArgs = [LANE, '--runs', RUNS, '--tag', TAG, ...(POOL ? ['--api-exits', POOL, '--mount-exits', POOL] : [])];
@@ -156,6 +177,12 @@ async function attemptOnce(lane) {
     `attempt ${i}: ${row.seconds}s exit=${code} outcome=${row.outcome} mail=${row.mailLatencyMs}ms tokenAge=${row.tokenAgeAtSubmitMs == null ? '-' : Math.round(row.tokenAgeAtSubmitMs) + 'ms'} (${row.tokenFrom || '-'}) register=${row.register ? row.register.status + (row.register.success ? ' ok' : '') : '-'} verify=${row.verify ? row.verify.status + ' sameEgress=' + row.verify.sameEgress : '-'} keys=${keys.length}`
   );
   fs.writeFileSync(path.join(LOOP_DIR, 'summary.json'), JSON.stringify({ at: new Date().toISOString(), count: COUNT, attemptsCap: ATTEMPTS, conc: CONC, keysBefore: startKeys, keysAfter: keyLines().length, rows }, null, 2));
+  if (keys.length > beforeKeys) {
+    const fresh = keys[keys.length - 1];
+    console.log(`✓ #${i} KEY ALINDI: ${fresh.slice(0, 22)}…   [${keys.length - startKeys} ok / ${i} deneme]`);
+  } else {
+    console.log(`✗ #${i} key yok: ${row.outcome || 'no outcome'}`);
+  }
 }
 
 async function worker(lane) {
@@ -163,6 +190,7 @@ async function worker(lane) {
     if (keyLines().length >= startKeys + COUNT) return;
     if (attemptsUsed >= ATTEMPTS) return;
     await attemptOnce(lane);
+    if (GAP_MS) await sleep(GAP_MS);
   }
 }
 
@@ -173,6 +201,7 @@ async function worker(lane) {
   await Promise.all(Array.from({ length: CONC }, (_, i) => worker(i + 1)));
   const after = keyLines().length;
   log(`mint done: keys ${startKeys} -> ${after} (${after - startKeys} new) in ${rows.length} attempt(s); yield: ${path.relative(DIR, path.join(LOOP_DIR, 'yield.tsv'))}`);
+  console.log(`MINT ${after - startKeys}/${COUNT} OK`);
   process.exit(0);
 })().catch((e) => {
   log(`FATAL ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`);

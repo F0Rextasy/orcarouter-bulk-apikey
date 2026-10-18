@@ -173,11 +173,13 @@ All code lives in `src/` — run it from the repository root as `node src/<file>
 
 | Tool | Flags |
 | --- | --- |
-| `src/mint.js` | `--count N` (5) · `--attempts N` (count+3) · `--conc N` (1–3) · `--runs N` (2) · `--tag` · `--pool FILE` (default `proxies.txt`) |
+| `src/mint.js` | `--count N` (5) · `--attempts N` (count+3) · `--conc N` (1–3) · `--preset turbo\|balanced\|safe` (lane count + pacing gap) · `--gap S` · `--runs N` (2) · `--tag` · `--pool FILE` (default `proxies.txt`) |
 | `src/turnstile-lane.js` | `--runs` · `--tag` · `--api-exits` / `--mount-exits` · `--mail` · `--email` + `--box-token` · `--register-only --code` · `--resume` · `--verify-only --key` · `--brain` · `--probe-only` |
 | `src/solver.js` | `--type turnstile\|recaptcha2\|hcaptcha` · `--sitekey` · `--url` · `--exits` · `--runs` · `--brain` · `--out` · `--headless` |
 | `src/verify.js` | re-checks every key in `keys.txt` — no required flags; reads `proxies.txt` |
 | `src/inbox.js` | self-check: creates one Mailtrap sandbox inbox and prints it |
+
+Turbo önerilir (5); daha fazlası zayıf bilgisayarda yük/ban riski.
 
 ## 🛰️ Behind a proxy
 
