@@ -14,7 +14,7 @@
  * workspace owner). See README § Verified. Exit code is 0 when every key is at
  * least authentic.
  *
- *   node src/verify.js                 # proxy pool: proxies.txt
+ *   node src/verify.js                 # pool proxies.txt (optional — direct when absent)
  *   node src/verify.js --key <key> # one key, without touching keys.txt
  */
 
@@ -33,11 +33,12 @@ const one = (n, d) => {
 
 const DIR = __dirname;
 const ONE_KEY = one('key', '');
-const EXIT_FILE = one('exits', path.join(DIR, 'proxies.txt'));
+const EXIT_FILE = one('exits', path.join(DIR, 'proxies.txt')); // [optional] exit list; absent/empty = direct
 
 function exits() {
+  let list = [];
   try {
-    return fs
+    list = fs
       .readFileSync(EXIT_FILE, 'utf8')
       .split(/\r?\n/)
       .map((l) => l.split('#')[0].trim())
@@ -49,8 +50,15 @@ function exits() {
       })
       .filter(Boolean);
   } catch (e) {
-    return [];
+    /* no pool file — handled below */
   }
+  if (!list.length) {
+    // No pool = DIRECT mode: a proxy is recommended at scale (per-IP limits,
+    // bans) but the tool works without one. `null` is the direct sentinel.
+    console.log(`no exits in ${EXIT_FILE} — running WITHOUT a proxy (direct). Put exits there (or pass --exits) to route through them.`);
+    return [null];
+  }
+  return list;
 }
 
 const keys = ONE_KEY
@@ -65,11 +73,8 @@ const keys = ONE_KEY
 
 (async () => {
   const list = exits();
-  if (!list.length) {
-    console.error(`no exits in ${EXIT_FILE} — one line per exit, scheme://host:port`);
-    process.exit(2);
-  }
-  console.log(`verify: ${keys.length} key(s), pool ${list.length} exit(s), ${nowIso()}\n`);
+  const poolLabel = list[0] ? `pool ${list.length} exit(s)` : 'no pool — direct egress';
+  console.log(`verify: ${keys.length} key(s), ${poolLabel}, ${nowIso()}\n`);
   let authenticated = 0;
   let spendable = 0;
   const out = [];

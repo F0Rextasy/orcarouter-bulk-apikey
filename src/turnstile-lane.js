@@ -13,7 +13,7 @@
  * answers `{"message":"Turnstile token is empty","success":false}` with no
  * token). The mount therefore hands its token straight to the verification call.
  *
- * Flow (every hop measured on 2026-10-15, all through exits, never direct):
+ * Flow (every hop measured on 2026-10-15; each hop uses a pool exit when an exit list is provided, and connects directly when none is):
  *   1. mailbox                 — MAILTRAP_TOKEN (own sandbox inbox) or a local
  *                                broker box (`--email` reuses an existing one)
  *   2. mount token #1          — solver.js --mount turnstile on the FRONT host
@@ -43,6 +43,8 @@
  *
  * Exit files (contract format, `# ` annotations stripped): by default the
  * repo-root `proxies.txt`; pass --api-exits / --mount-exits to split them.
+ * The pool is optional — a missing or empty file means DIRECT mode (`null` is
+ * the direct sentinel); fail-closed applies only while exits were provided.
  */
 
 const fs = require('fs');
@@ -108,6 +110,9 @@ const log = (...a) => {
   appendLine(LOG, line);
 };
 
+/** Exit label for records/logs: the exit's line, or `direct` for the null slot. */
+const exitLabel = (p) => (p ? p.line || p.raw || `${p.host}:${p.port}` : 'direct');
+
 // ------------------------------------------------------------------- timeline
 // The race this lane lost early on was a *timing* race: the mail body became
 // readable ~5 min after sendCode (Mailtrap ingests the body behind the
@@ -151,8 +156,9 @@ const mark = (name, extra = {}) => {
 mark('start');
 
 function lineFile(file) {
+  let list = [];
   try {
-    return fs
+    list = fs
       .readFileSync(file, 'utf8')
       .split(/\r?\n/)
       .map((l) => l.split('#')[0].trim())
@@ -164,8 +170,15 @@ function lineFile(file) {
       })
       .filter(Boolean);
   } catch (e) {
-    return [];
+    /* no pool file — handled below */
   }
+  if (!list.length) {
+    // No pool = DIRECT mode: a proxy is recommended at scale (per-IP limits,
+    // bans) but the lane works without one. `null` is the direct sentinel.
+    log(`no proxy list at ${file} — running WITHOUT a proxy (direct). Put exits there (or pass --api-exits) to route through them.`);
+    return [null];
+  }
+  return list;
 }
 
 const API_EXITS = lineFile(one('api-exits', path.join(DIR, 'proxies.txt')));
@@ -177,17 +190,17 @@ const MOUNT_EXITS = one('mount-exits', path.join(DIR, 'proxies.txt'));
 /** Run the mount solver and return tokens (newest first) with the exit that minted them. */
 function mountTokens({ runs = RUNS } = {}) {
   return new Promise((resolve) => {
-    if (!fs.existsSync(MOUNT_EXITS)) {
-      log(`mount exits file missing: ${MOUNT_EXITS}`);
-      return resolve([]);
-    }
+    // A missing pool file is DIRECT mode: the solver prints its own notice and
+    // launches Chrome without a proxy; fail-closed applies only to a pool that
+    // was provided (an all-dead screen then fails the mount, never a direct solve).
+    const hasPool = fs.existsSync(MOUNT_EXITS);
     const args = [
       path.join(__dirname, 'solver.js'),
       '--type', 'turnstile',
       '--mount', 'turnstile',
       '--sitekey', SITEKEY,
       '--url', MOUNT_URL,
-      '--exits', MOUNT_EXITS,
+      ...(hasPool ? ['--exits', MOUNT_EXITS] : []),
       '--runs', String(runs),
       '--run-attempts', '2',
       // The solver answers image rounds through the vision spec below. `spool`
@@ -200,7 +213,7 @@ function mountTokens({ runs = RUNS } = {}) {
       '--brain-proxy', 'pooled',
       '--out', MOUNT_OUT,
     ];
-    log(`mount: ${MOUNT_EXITS} -> ${MOUNT_URL} (sitekey ${SITEKEY}, brain ${BRAIN_SPEC})`);
+    log(`mount: ${hasPool ? MOUNT_EXITS : 'direct (no pool file)'} -> ${MOUNT_URL} (sitekey ${SITEKEY}, brain ${BRAIN_SPEC})`);
     const child = spawn(process.execPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (c) => {
@@ -257,7 +270,7 @@ async function spendOnce(p, token, email, param) {
       : /whitelist|白名单|not allowed|不允许|not in the/i.test(message)
       ? 'DOMAIN-BLOCKED'
       : 'OTHER';
-  return { status: res.status, message, verdict, exit: p.line || p.raw || `${p.host}:${p.port}`, param };
+  return { status: res.status, message, verdict, exit: exitLabel(p), param };
 }
 
 /**
@@ -285,7 +298,7 @@ async function spendToken(token, email, mintExit, { conc = 4 } = {}) {
       }
     }
     // 2) race the screened API exits
-    const queue = API_EXITS.filter((p) => !mintExit || p.line !== mintExit.line);
+    const queue = API_EXITS.filter((p) => !mintExit || !p || p.line !== mintExit.line);
     let done = null;
     const workers = Array.from({ length: Math.min(conc, Math.max(queue.length, 1)) }, async () => {
       while (queue.length && !done) {
@@ -293,11 +306,11 @@ async function spendToken(token, email, mintExit, { conc = 4 } = {}) {
         try {
           const r = await spendOnce(p, token, email, param);
           attempts.push(r);
-          log(`  spend[${param}] via ${p.line}: ${r.verdict} ${r.status} ${r.message.slice(0, 140)}`);
+          log(`  spend[${param}] via ${exitLabel(p)}: ${r.verdict} ${r.status} ${r.message.slice(0, 140)}`);
           done = r;
           return;
         } catch (e) {
-          attempts.push({ param, exit: p.line, transport: String(e.message).slice(0, 120) });
+          attempts.push({ param, exit: exitLabel(p), transport: String(e.message).slice(0, 120) });
         }
       }
     });
@@ -359,12 +372,12 @@ async function main() {
 
   /**
    * Verify a key on this provider's own API from an exit that is neither the
-   * register nor the sendCode egress (a key is only "verified" when the
-   * provider's own API answers it from a different exit). On 200 it appends
-   * keys.txt + models.json and records the chat evidence.
+   * register nor the sendCode egress (with a pool — direct mode has one egress
+   * and records `exhausted: true`). On 200 it appends keys.txt + models.json
+   * and records the chat evidence.
    */
   const verifyKey = async (rec, key, { keySource = 'panel-token', regExit = null, spendExit = null } = {}) => {
-    const verifyExits = API_EXITS.filter((p) => p.line !== regExit && p.line !== spendExit);
+    const verifyExits = API_EXITS.filter((p) => exitLabel(p) !== regExit && exitLabel(p) !== spendExit);
     const verifyPool = verifyExits.length ? new ExitPool(verifyExits, { label: 'ur-verify' }) : apiPool;
     const verifyPanel = new Panel(API, verifyPool, { log: (m) => log('  ' + m), label: 'ur-verify' });
     const v = await verifyPanel.models(key, { tries: 12 });
@@ -403,7 +416,7 @@ async function main() {
         // that MITMs POSTs (measured: the same HTTP proxy answers GET /v1/models
         // 200 and then fails TLS on POST /v1/chat/completions), so a transport
         // failure there falls straight back to the screened pool.
-        const pinned = API_EXITS.find((p) => p.line === v.exit) || null;
+        const pinned = API_EXITS.find((p) => exitLabel(p) === v.exit) || null;
         const pinnedPanel = pinned ? new Panel(API, new ExitPool([pinned], { label: 'ur-chat-pinned' }), { log: (m) => log('  ' + m), label: 'ur-chat-pinned' }) : null;
         if (pinned) log(`spend probe pinned to the models exit ${v.exit} (pool fallback armed)`);
         for (const model of ladder.slice(0, 3)) {

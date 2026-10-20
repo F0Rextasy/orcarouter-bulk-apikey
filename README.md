@@ -103,7 +103,8 @@ On a fresh (unfunded) account the first call answers `402` and the `-free` model
 # clone this repository (or download the ZIP), then:
 cd orcarouter-bulk-apikey
 
-# 1) your proxy list, one exit per line (http://, socks5://, socks4:// or bare host:port)
+# 1) (optional) your proxy list, one exit per line (http://, socks5://, socks4:// or bare host:port)
+#    skip this and the tools connect directly
 printf 'socks5://127.0.0.1:1080\n' > src/proxies.txt
 
 # 2) a mailbox that can receive the sign-up code
@@ -120,7 +121,7 @@ node src/cli.js help                       # task list
 node src/mint.js --count 5 --help          # mint's own flag reference
 ```
 
-Everything the tools write lands **next to the code**: `src/keys.txt`, `src/accounts.json`, `src/out/` — and the catalogue they read is `src/models.json`. The pool is read from `src/proxies.txt`. Keys are appended the moment they verify; each attempt's record lands in `out/mint-<ts>/{summary.json,yield.tsv}`.
+Everything the tools write lands **next to the code**: `src/keys.txt`, `src/accounts.json`, `src/out/` — and the catalogue they read is `src/models.json`. The pool is read from `src/proxies.txt` when it exists — without one the tools connect directly. Keys are appended the moment they verify; each attempt's record lands in `out/mint-<ts>/{summary.json,yield.tsv}`.
 
 ### 🖱️ The launcher
 
@@ -173,19 +174,23 @@ All code lives in `src/` — run it from the repository root as `node src/<file>
 
 | Tool | Flags |
 | --- | --- |
-| `src/mint.js` | `--count N` (5) · `--attempts N` (count+3) · `--conc N` (1–3) · `--preset turbo\|balanced\|safe` (lane count + pacing gap) · `--gap S` · `--runs N` (2) · `--tag` · `--pool FILE` (default `proxies.txt`) |
+| `src/mint.js` | `--count N` (5) · `--attempts N` (count+3) · `--conc N` (1–3) · `--preset turbo\|balanced\|safe` (lane count + pacing gap) · `--gap S` · `--runs N` (2) · `--tag` · `--pool FILE` (optional; default `proxies.txt`) |
 | `src/turnstile-lane.js` | `--runs` · `--tag` · `--api-exits` / `--mount-exits` · `--mail` · `--email` + `--box-token` · `--register-only --code` · `--resume` · `--verify-only --key` · `--brain` · `--probe-only` |
 | `src/solver.js` | `--type turnstile\|recaptcha2\|hcaptcha` · `--sitekey` · `--url` · `--exits` · `--runs` · `--brain` · `--out` · `--headless` |
-| `src/verify.js` | re-checks every key in `keys.txt` — no required flags; reads `proxies.txt` |
+| `src/verify.js` | re-checks every key in `keys.txt` — no required flags; optional `proxies.txt` pool |
 | `src/inbox.js` | self-check: creates one Mailtrap sandbox inbox and prints it |
 
 Turbo önerilir (5); daha fazlası zayıf bilgisayarda yük/ban riski.
 
 ## 🛰️ Behind a proxy
 
-* Exits come from `src/proxies.txt` (one line per exit, `scheme://host:port`, `user:pass@` supported). The same pool feeds the page loads, the API calls and the solver's own pre-checks; the tools never dial the provider directly.
+**Optional — recommended at scale (per-IP limits, bans).** The tool works without a proxy too.
+
+* Exits come from `src/proxies.txt` (one line per exit, `scheme://host:port`, `user:pass@` supported) or `--pool FILE` on `mint`. The same pool feeds the page loads, the API calls and the solver's own pre-checks.
+* **With a pool:** every request goes through an exit from that list — a dead exit fails that attempt and the tool moves to the next one (fail-closed while a pool is provided).
+* **Without a pool:** the CLI prints `running WITHOUT a proxy (direct)` and connects directly — page loads, API calls and the solver all go direct. Nothing about sign-up, key minting or verification changes — only where the packets leave from.
 * Mail is read from **Mailtrap** (`api.mailtrap.io`) with your `MAILTRAP_TOKEN` — that is the mail provider, not the target. A clone without `MAILTRAP_TOKEN` falls back to a local inbox broker on `127.0.0.1:9700` when one is running.
-* Chrome is launched per account with the exit as its proxy and closed as soon as the account is done.
+* Chrome is launched per account with the exit as its proxy when a pool is given, and with no proxy at all in direct mode; it is closed as soon as the account is done.
 * **Do not try to create an extra key in the panel.** `POST /api/token/` answers `403 Security verification is required`; keep `initial_token` from the sign-up.
 
 ## 📄 Files

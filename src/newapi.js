@@ -3,9 +3,11 @@
 /**
  * New API (and fork) client used by the bulk mints.
  *
- * Every call goes through an exit from the pool; the client keeps the panel
- * session as a `Cookie` string plus the `New-Api-User` header the fork needs for
- * `/api/*`, and re-picks an exit whenever the transport (not the panel) fails.
+ * Every call goes through an exit from the pool when one is provided; a `null`
+ * entry is the direct slot (no pool was given) and is recorded as `direct`.
+ * The client keeps the panel session as a `Cookie` string plus the
+ * `New-Api-User` header the fork needs for `/api/*`, and re-picks an exit
+ * whenever the transport (not the panel) fails.
  *
  * Endpoint shapes differ between forks, so nothing is assumed: `probe()` asks
  * the live panel which register/verification routes exist before the mint uses
@@ -16,6 +18,9 @@ const { req, sleep } = require('./lib');
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+
+/** Record/log label for the exit a call ran on: its line, or `direct` for the null slot. */
+const exitLabel = (p) => (p ? p.line : 'direct');
 
 class Panel {
   constructor(base, pool, { log = () => {}, label = 'panel' } = {}) {
@@ -89,7 +94,7 @@ class Panel {
           agent: this.agent || null,
         });
         this.cookiesFrom(res);
-        this.lastExit = p.line;
+        this.lastExit = exitLabel(p);
         if (raw) return res;
         let json = null;
         try {
@@ -97,7 +102,7 @@ class Panel {
         } catch (e) {
           json = null;
         }
-        return { status: res.status, json, text: res.text, headers: res.headers, exit: p.line };
+        return { status: res.status, json, text: res.text, headers: res.headers, exit: exitLabel(p) };
       },
       { tries, label: `${method} ${pathname}` }
     );
@@ -230,14 +235,14 @@ class Panel {
     return this.pool.attempt(
       async (p) => {
         const res = await req(p, url, { headers: { authorization: `Bearer ${key}`, accept: 'application/json', 'user-agent': UA }, timeoutMs, agent: this.agent || null });
-        this.lastExit = p.line;
+        this.lastExit = exitLabel(p);
         let json = null;
         try {
           json = JSON.parse(res.text);
         } catch (e) {
           json = null;
         }
-        return { status: res.status, json, text: res.text, exit: p.line };
+        return { status: res.status, json, text: res.text, exit: exitLabel(p) };
       },
       { tries, label: 'GET /v1/models' }
     );
@@ -255,14 +260,14 @@ class Panel {
           timeoutMs,
           agent: this.agent || null,
         });
-        this.lastExit = p.line;
+        this.lastExit = exitLabel(p);
         let json = null;
         try {
           json = JSON.parse(res.text);
         } catch (e) {
           json = null;
         }
-        return { status: res.status, json, text: res.text, exit: p.line };
+        return { status: res.status, json, text: res.text, exit: exitLabel(p) };
       },
       { tries, label: 'POST /v1/chat/completions' }
     );

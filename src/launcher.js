@@ -108,7 +108,7 @@ async function connectFlow() {
 async function main() {
   process.stdout.write('\x1b[2J\x1b[H');
   banner();
-  console.log('  proxy exits: ' + (count(POOL) || 'none — put exits in proxies.txt') + '     keys on disk: ' + count(KEYS) + '\n');
+  console.log('  proxy exits: ' + (count(POOL) || 'none — running WITHOUT a proxy (direct)') + '     keys on disk: ' + count(KEYS) + '\n');
   console.log('  1) mint      create fresh accounts and mint one key each');
   console.log('  2) verify    re-check keys that are already on disk');
   console.log('  3) Settings');

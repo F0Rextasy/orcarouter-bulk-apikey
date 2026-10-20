@@ -24,10 +24,12 @@
  * `--feed <dir>` implements exactly that contract, so it replaces io.net's
  * `auto-feed.js` with an honest (vision) tile set.
  *
- * Network policy: page loads and (pooled) model calls go through a pool exit
- * (Chrome per-context proxyServer / the bundled proxy.js createAgent). Nothing
- * in this file dials the model providers directly unless `--brain-proxy direct`
- * is passed deliberately.
+ * Network policy: with an exit list (`--exits`/`--pool`) page loads and model
+ * calls go through a pool exit (Chrome per-context proxyServer / the bundled
+ * proxy.js createAgent); with no list the solver connects directly and Chrome
+ * launches without a proxy. Fail-closed applies only while a list was provided
+ * — a dead exit is retried, never replaced by the direct route (except
+ * `--brain-proxy direct`, which pins model calls direct on purpose).
  *
  * Output contract (measured trap for callers, 2026-10-15):
  *   per-run records  out/captcha-<basename(--out)>-runN.json   (SIBLING of --out)
@@ -73,7 +75,7 @@ const OPTS = {
   maxRounds: parseInt(arg('max-rounds', '3'), 10),
   port: arg('port', '') ? parseInt(arg('port'), 10) : 0,
   attach: arg('attach', '') ? parseInt(arg('attach'), 10) : 0,
-  pool: arg('pool', path.join(OUTDIR, 'upstage-console-live.txt')),
+  pool: arg('pool', path.join(OUTDIR, 'upstage-console-live.txt')), // [optional] exit list
   proxy: arg('proxy', ''),
   brain: arg('brain', 'auto'),
   brainProxy: arg('brain-proxy', ''), // proxy line used for model calls (default: the page's exit)
@@ -84,7 +86,7 @@ const OPTS = {
   proxyTries: parseInt(arg('proxy-tries', '6'), 10),
   screenshot: arg('screenshot', ''), // extra: always write the round PNG to this dir
   verifyWaitMs: parseInt(arg('verify-wait-ms', '3800'), 10),
-  exits: arg('exits', ''), // pre-screened exit list (from --screen-exits or a previous run)
+  exits: arg('exits', ''), // [optional] pre-screened exit list (--screen-exits or a previous run)
   screen: !flag('no-screen'), // probe each candidate exit before spending a run on it
   screenNeed: parseInt(arg('screen-need', '6'), 10),
   screenConcurrency: parseInt(arg('screen-concurrency', '8'), 10),
@@ -129,7 +131,7 @@ function httpGetJson(port, p) {
   });
 }
 
-/** One HTTP POST/GET through an exit; returns {status, text, ms} — no own-IP path. */
+/** One HTTP POST/GET through a pool exit, or straight out when `proxyLine` is null. */
 function httpJson(proxyLine, url, { method = 'POST', headers = {}, body = null, timeoutMs = 90000 } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
@@ -1434,8 +1436,10 @@ class PageRun {
       return this;
     }
     const proxy = this.proxyLine ? parseProxy(this.proxyLine) : null;
-    const proxyServer = proxy ? browserUrl(proxy) : undefined;
-    const ctx = await this.cdp.send('Target.createBrowserContext', { proxyServer, disposeOnDetach: false });
+    const params = { disposeOnDetach: false };
+    // Direct mode (no proxy): no `proxyServer` at all — Chrome dials out itself.
+    if (proxy) params.proxyServer = browserUrl(proxy);
+    const ctx = await this.cdp.send('Target.createBrowserContext', params);
     this.browserContextId = ctx.browserContextId;
     const { targetId } = await this.cdp.send('Target.createTarget', { url: 'about:blank', browserContextId: this.browserContextId });
     this.targetId = targetId;
@@ -2166,10 +2170,12 @@ class ExitPicker {
     this.log = log;
     this.queue = [];
     this.used = new Set();
+    this.direct = false;
   }
 
   async next() {
     if (OPTS.proxy) return OPTS.proxy;
+    if (this.direct) return null; // no pool: every run goes direct
     if (!this.queue.length) await this.refill();
     const p = this.queue.shift();
     if (!p) throw new Error('no usable exit (pool + screen filter came up empty)');
@@ -2179,11 +2185,20 @@ class ExitPicker {
 
   async refill() {
     const source = OPTS.exits && fs.existsSync(OPTS.exits) ? OPTS.exits : OPTS.pool;
-    const raw = fs
-      .readFileSync(source, 'utf8')
-      .split(/\r?\n/)
-      .map((l) => l.split('#')[0].trim())
-      .filter(Boolean);
+    let raw = [];
+    try {
+      raw = fs
+        .readFileSync(source, 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.split('#')[0].trim())
+        .filter(Boolean);
+    } catch (e) {
+      // No pool = DIRECT mode: a proxy is recommended at scale (per-IP limits,
+      // bans) but the solver works without one. `null` is the direct sentinel.
+      this.direct = true;
+      this.log(`[exit] no proxy list at ${source} — running WITHOUT a proxy (direct). Put exits there (or pass --exits) to route through them.`);
+      return;
+    }
     const cands = [];
     for (const l of raw) {
       const s = l.trim();
@@ -2197,6 +2212,11 @@ class ExitPicker {
       if (!usableInBrowser(proxy) || isLocalHost(proxy.host)) continue;
       if (this.used.has(s)) continue;
       cands.push(s);
+    }
+    if (!cands.length) {
+      this.direct = true;
+      this.log(`[exit] ${path.basename(source)} has no usable exits — running WITHOUT a proxy (direct).`);
+      return;
     }
     const canScreen = OPTS.screen && !!OPTS.url;
     if (!canScreen) {
@@ -2270,9 +2290,10 @@ async function main() {
 
   // --brain-proxy direct is approved ONLY for the vision call (operator decision
   // 2026-10-15): the page, the widget, the token read and every target-host request
-  // stay on a pool exit. Constraints: model providers we already use only (the
-  // PROVIDERS table is the allowlist), nothing target-identifying in the request
-  // beyond the image, and the mode is logged per run so the exit saving is measured.
+  // stay on a pool exit when one is provided (direct otherwise). Constraints:
+  // model providers we already use only (the PROVIDERS table is the allowlist),
+  // nothing target-identifying in the request beyond the image, and the mode is
+  // logged per run so the exit saving is measured.
   const BRAIN_PROXY_MODE = OPTS.brainProxy === 'direct' ? 'direct' : 'pooled';
   if (BRAIN_PROXY_MODE === 'direct' && /^http:/.test(OPTS.brain)) {
     log('[brain] WARNING: --brain-proxy direct with a custom endpoint — confirm it is a model provider you already trust');
@@ -2306,7 +2327,7 @@ async function main() {
       // another exit for the same run index instead of recording a loss.
       for (let a = 1; a <= OPTS.runAttempts; a++) {
         const proxyLine = reuseTargetId ? '(caller page exit)' : await picker.next();
-        log(`run ${i + 1}/${OPTS.runs} attempt ${a}/${OPTS.runAttempts} via ${proxyLine}`);
+        log(`run ${i + 1}/${OPTS.runs} attempt ${a}/${OPTS.runAttempts} via ${proxyLine || 'direct'}`);
         const page = new PageRun(cdp, { proxyLine, brain, log, reuseTargetId });
         const att = { attempt: a, proxy: proxyLine, at: new Date().toISOString() };
         try {

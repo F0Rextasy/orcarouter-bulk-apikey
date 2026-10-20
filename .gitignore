@@ -4,6 +4,7 @@ node_modules/
 keys.txt
 keys.json
 *.txt
+proxies.txt
 accounts.json
 outputs/
 out/

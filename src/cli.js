@@ -10,6 +10,10 @@
  *
  * Every task spawns the matching module in this folder, so a crash in one run
  * never leaves state behind in this process.
+ *
+ * The exit pool is optional: with `proxies.txt` (or a task's own --pool/--exits)
+ * every request goes through an exit from that list; with no pool the task
+ * connects directly.
  */
 
 const path = require('path');
@@ -30,8 +34,9 @@ function help() {
   console.log('  node src/<task-file> --help');
   console.log('\nrun-shape presets (forwarded to the task as-is):');
   console.log('  --preset=turbo|balanced|safe   turbo = 5 lanes (capped at 3), balanced = 4, safe = 2');
-  console.log('\nproxy pool:');
+  console.log('\nproxy pool [optional]:');
   console.log('  one exit per line in proxies.txt — scheme://host:port[#comment], user:pass@ supported');
+  console.log('Requests go through your proxy list when one is provided (proxies.txt / --pool). Without a pool the tool connects directly.');
   console.log('\n9Router (optional, local inference router):');
   console.log('  node src/cli.js connect --api-key <key>        register node + key (node src/connect-9router.js --help)');
   console.log('  node src/cli.js --connect-9router --api-key <key>   the same task');
