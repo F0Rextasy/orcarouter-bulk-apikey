@@ -23,7 +23,7 @@ const defaults = { count: 5, conc: 1, preset: '' };
 let cfg = { ...defaults };
 try { Object.assign(cfg, JSON.parse(fs.readFileSync(CONFIG, 'utf8'))); } catch (e) {}
 const save = () => fs.writeFileSync(CONFIG, JSON.stringify(cfg, null, 2) + '\n');
-const ARGS = {"mint":["--count","count","--conc","conc"],"verify":[]};
+const ARGS = {"mint":["--auto","--count","count","--conc","conc"],"verify":[]};
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q, fb) => new Promise((r) => rl.question(q + (fb !== undefined ? ' [' + fb + ']' : '') + ': ', (a) => r(String(a).trim() || fb)));
@@ -109,13 +109,15 @@ async function main() {
   process.stdout.write('\x1b[2J\x1b[H');
   banner();
   console.log('  proxy exits: ' + (count(POOL) || 'none — running WITHOUT a proxy (direct)') + '     keys on disk: ' + count(KEYS) + '\n');
-  console.log('  1) mint      create fresh accounts and mint one key each');
+  console.log('  1) Mint keys      create fresh accounts and mint one key each');
   console.log('  2) verify    re-check keys that are already on disk');
   console.log('  3) Settings');
   console.log('  4) 9Router   register a key with a local 9Router instance (asks for base/password/key)');
   console.log('  0) Exit\n');
   const choice = await ask('choose', '1');
   if (choice === '1') {
+    cfg.count = Number(await ask('How many keys?', cfg.count)) || cfg.count;
+    save();
     run(['mint.js', ...argsFor('mint')]);
   }
   else if (choice === '2') {

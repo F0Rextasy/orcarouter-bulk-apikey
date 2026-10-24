@@ -20,7 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ExitPool, nowIso } = require('./lib.js');
+const { ExitPool, nowIso, appendLine } = require('./lib.js');
 const { Panel } = require('./newapi.js');
 const { parseProxy } = require('./proxy.js');
 
@@ -33,6 +33,29 @@ const one = (n, d) => {
 
 const DIR = __dirname;
 const ONE_KEY = one('key', '');
+/**
+ * Dead-key ledger: `keys.txt`'s neighbour `keys-dead.txt`, one `key<TAB>reason<TAB>ISO`
+ * line per key that the provider itself refuses. Only a hard refusal is recorded —
+ * the verdict has to be about the key:
+ *   401 unauthorized · 402 payment required (quota) · 403 forbidden
+ * Everything else (429 rate-limit, 5xx, transport, spend-gated free tier) is the
+ * exit's or the account's temporary state and is NOT written: measured, a flapping
+ * exit answers 429 for a key that answers 200 on the next exit.
+ */
+const DEAD_FILE = path.join(DIR, 'keys-dead.txt');
+const DEAD_CLASS = { 401: 'unauthorized', 402: 'quota', 403: 'forbidden' };
+
+const deadClass = (status) => DEAD_CLASS[Number(status)] || '';
+
+/** Already-recorded keys are not duplicated: the file is a ledger, not a log. */
+function markDead(key, reason) {
+  let old = '';
+  try { old = fs.readFileSync(DEAD_FILE, 'utf8'); } catch (e) { /* first dead key */ }
+  if (old.includes(`${key}\t`)) return false;
+  appendLine(DEAD_FILE, `${key}\t${reason}\t${nowIso()}`);
+  return true;
+}
+
 const EXIT_FILE = one('exits', path.join(DIR, 'proxies.txt')); // [optional] exit list; absent/empty = direct
 
 function exits() {
@@ -77,6 +100,7 @@ const keys = ONE_KEY
   console.log(`verify: ${keys.length} key(s), ${poolLabel}, ${nowIso()}\n`);
   let authenticated = 0;
   let spendable = 0;
+  let dead = 0;
   const out = [];
   for (const key of keys) {
     const pool = new ExitPool(list, { label: 'verify' });
@@ -88,7 +112,15 @@ const keys = ONE_KEY
       const ids = m.status === 200 ? ((m.json && m.json.data) || []).map((x) => x.id) : [];
       console.log(`${rec.keyPrefix}…  models ${m.status} via ${m.exit}${m.status === 200 ? ` (${ids.length} models)` : ''}`);
       if (m.status !== 200) {
-        rec.verdict = 'not authentic';
+        const cls = deadClass(m.status);
+        if (cls && !ONE_KEY) {
+          // `--key <k>` is an ad-hoc probe, not a ledger entry for keys.txt
+          const wrote = markDead(key, cls);
+          if (wrote) dead++;
+          rec.dead = cls;
+          console.log(wrote ? `  ⇒ dead key recorded in keys-dead.txt (${cls})` : `  ⇒ already recorded in keys-dead.txt (${cls})`);
+        }
+        rec.verdict = cls ? `not authentic (${cls})` : `not authentic (HTTP ${m.status} — not a key verdict)`;
         out.push(rec);
         continue;
       }
@@ -128,7 +160,7 @@ const keys = ONE_KEY
     out.push(rec);
     console.log(`  ⇒ ${rec.verdict}\n`);
   }
-  console.log(`summary: ${keys.length} key(s) · authentic ${authenticated} · spendable ${spendable}`);
+  console.log(`summary: ${keys.length} key(s) · authentic ${authenticated} · spendable ${spendable} · written to keys-dead.txt ${dead}`);
   try {
     fs.writeFileSync(path.join(DIR, 'out', 'verify-last.json'), JSON.stringify({ at: nowIso(), api: API, results: out }, null, 2));
   } catch (e) {

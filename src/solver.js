@@ -252,7 +252,6 @@ async function connect(port) {
 
 async function attach(cdp, targetId) {
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
-  await cdp.send('Runtime.enable', {}, sessionId).catch(() => null);
   await cdp.send('Page.enable', {}, sessionId).catch(() => null);
   return sessionId;
 }

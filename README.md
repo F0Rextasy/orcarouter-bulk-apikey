@@ -31,6 +31,12 @@
 
 </div>
 
+<div align="center">
+
+**English** · [Türkçe](README.tr.md) · [中文](README.cn.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Русский](README.ru.md) · [Português](README.pt.md)
+
+</div>
+
 ---
 
 ## ✨ Why this exists
@@ -135,7 +141,7 @@ A menu over **mint · verify · 9Router**: it asks for `count` (keys per run, de
 
 ## ✅ Verified working — every key is tested
 
-Measured **2026-10-15**: **5 distinct accounts → 5 keys, one key per account** (the fifth was minted end-to-end by the published build). Every key was checked after it existed.
+Measured **2026-10-15**: **keys verified** (the fifth was minted end-to-end by the published build). Every key was checked after it existed.
 
 | Model | Live (models) | Real chat call | Measured |
 | --- | --- | --- |

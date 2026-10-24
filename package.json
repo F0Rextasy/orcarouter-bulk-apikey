@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "node src/launcher.js",
-    "mint": "node src/cli.js"
+    "mint": "node src/cli.js --auto"
   },
   "keywords": [
     "api-key",
@@ -46,6 +46,7 @@
     "src/verify.js",
     "src/models.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "src"
   ]
 }
